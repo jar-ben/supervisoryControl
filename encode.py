@@ -50,7 +50,7 @@ for s in states:
     solver.add(C[s] == Or([M[s]] + [C[s2] for s2 in (transitionsC[s] + transitionsU[s])]))
 
 for s in states:
-    solver.add(Not(X[s]) == Or([T[s], Not(C[s])] + [Not(X[s2]) for s2 in transitionsC[s]]))
+    solver.add(Not(X[s]) == Or([T[s], Not(C[s])] + [Not(X[s2]) for s2 in transitionsU[s]]))
 
 #assumptions (fixed variables)
 assumptions = []
