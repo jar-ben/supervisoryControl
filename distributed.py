@@ -1,5 +1,5 @@
 from z3 import *
-
+import itertools
 
 class Automaton:
     def __init__(self, init):
@@ -20,6 +20,86 @@ class Automaton:
             print("The state {} is unknown. Add transitions before marking states.".format(q))
         assert q in self.states
         self.marked.add(q)
+
+class Distributed:
+    def __init__(self, automata = []):
+        self.automata = automata
+        self.solver = Solver()
+
+    def addAutomaton(self, a):
+        self.automata.append(a)
+
+    def stateVars(self, state, V):
+        assert len(state) == len(self.automata)
+        variables = []
+        for i in range(len(state)):
+            variables.append(V[i][state[i]])
+
+        return variables
+
+    # returns a list of controllable successor states of the state
+    def succC(self, state):
+        states = []
+
+        return states
+
+    # returns a list of uncontrollable successor states of the state
+    def succUC(self, state):
+        pass
+
+    def succ(self, state):
+        return self.succC(state) + self.succUC(state)
+
+    def isMarked(self, state):
+        pass
+
+    def isSafe(self, state):
+        pass
+
+    def encode(self):
+        self.X = []
+        for i in range(len(self.automata)):
+            self.X.append(dict((s, Bool("x_" + str(i) + "_" + s)) for s in self.automata[i].states))
+        self.M = []
+        for i in range(len(self.automata)):
+            self.M.append(dict((s, Bool("m_" + str(i) + "_" + s)) for s in self.automata[i].states))
+        self.C = []
+        for i in range(len(self.automata)):
+            self.C.append(dict((s, Bool("c_" + str(i) + "_" + s)) for s in self.automata[i].states))
+        self.T = []
+        for i in range(len(self.automata)):
+            self.T.append(dict((s, Bool("t_" + str(i) + "_" + s)) for s in self.automata[i].states))
+
+        indices = [[i for i in range(len(a.states))] for a in self.automata]
+        print("indices", indices)
+        self.states = list(itertools.product(*indices))
+        print("combinations", self.states) 
+
+        for s in self.states:
+            left = And(self.stateVars(s, self.C)) 
+            right = [And(self.stateVars(s, self.M) + self.stateVars(s, self.X))] # M[s] & X[s]
+            right += [Or([And(self.stateVars(s2, self.C) + self.stateVars(s2, self.X)) for s2 in self.succ(s)])]
+            solver.add(left == Or(right))
+
+        for s in self.states:
+            left = And(self.stateVars(s, self.X))
+            right = [And(self.stateVars(s, self.T)), Not(And(self.stateVars(s, self.C)))]
+            right += [Not(And(self.stateVars(s2, self.X))) for s2 in self.succU(s)]
+            solver.add(left == Or(right))
+
+        # marked states
+        for s in self.states:
+            if self.isMarked(s):
+                s.add(And(self.stateVars(s, self.M)))
+            else:
+                s.add(Not(And(self.stateVars(s, self.M))))
+
+        # unsafe states
+        for s in self.states:
+            if not self.isSafe(s):
+                s.add(And(self.stateVars(s, self.T)))
+            else:
+                s.add(Not(And(self.stateVars(s, self.T))))
 
 #######################
 ### Definition of the base automata
@@ -55,75 +135,7 @@ K2.addTransition("p5", "p0", controllable = True, action = "alpha")
 K2.markState("p2")
 K2.markState("p5")
 
-
-
-
-#######################
-### Z3 Boolean encoding
-#######################
-#build the variables
-X = dict((s, Bool("x" + s)) for s in states)
-M = dict((s, Bool("m" + s)) for s in states)
-C = dict((s, Bool("c" + s)) for s in states)
-D = dict()
-T = dict((s, Bool("T" + s)) for s in states) #unsafe state variables
-
-#note that we assume here that there are not two states q1, q2 such that there is both a controllable and uncontrollable transition q1->q2
-for q1 in states:
-    for q2 in (transitionsC[q1] + transitionsU[q1]):
-        D[(q1,q2)] = Bool(q1 + q2)
-
-
-#feed the formulas to the solver
-solver = Solver()
-
-for s in states:
-    solver.add(C[s] == Or([M[s]] + [C[s2] for s2 in (transitionsC[s] + transitionsU[s])]))
-
-for s in states:
-    solver.add(Not(X[s]) == Or([T[s], Not(C[s])] + [Not(X[s2]) for s2 in transitionsU[s]]))
-
-print(solver)
-
-#assumptions (fixed variables)
-assumptions = []
-for s in states:
-    assumptions.append(M[s] if marked[s] else Not(M[s]))
-    assumptions.append(T[s] if unsafe[s] else Not(T[s]))
-
-
-#if not solver.check(assumptions + [C["q5"]]):
-if  solver.check(assumptions) == unsat:
-    print("UNSAT")
-else:
-    print("SAT")
-    m = solver.model()
-    for s in states:
-        print(s, m[X[s]])
-
-
-solver.add(Not(X["q0"]))
-if solver.check(assumptions) == unsat:
-    print("UNSAT")
-else:
-    print("SAT")
-    m = solver.model()
-    for s in states:
-        print("x" + s[1:], m[X[s]])
-    for s in states:
-        print("m" + s[1:], m[M[s]])
-    for s in states:
-        print("t" + s[1:], m[T[s]])
-    for s in states:
-        print("c" + s[1:], m[C[s]])
-#count the number of models
-models = []
-
-
-
-
-
-
-
+D = Distributed([K1, K2])
+D.encode()
 
 
