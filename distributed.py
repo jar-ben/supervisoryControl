@@ -4,13 +4,27 @@ import itertools
 class Automaton:
     def __init__(self, init):
         self.init = init
-        self.states = set()
+        self.states = []
         self.transitions = dict()
         self.marked = set()
+        self.unsafe = set()
+        self.alphabet = set()
+        self.mapa = dict()
+
+    def getAlphabet(self):
+        if len(self.alphabet) == 0:
+            for state in self.transitions:
+                for t in self.transitions[state]:
+                    self.alphabet.add(t[1])
+        return self.alphabet
 
     def addTransition(self, q1, q2, controllable = True, action = ""):
-        self.states.add(q1)
-        self.states.add(q2)
+        if q1 not in self.states:
+            self.states.append(q1)
+            self.mapa[q1] = len(self.states) - 1
+        if q2 not in self.states:
+            self.states.append(q2)
+            self.mapa[q2] = len(self.states) - 1
         if not q1 in self.transitions:
             self.transitions[q1] = []
         self.transitions[q1].append((q2, action, controllable))
@@ -20,6 +34,12 @@ class Automaton:
             print("The state {} is unknown. Add transitions before marking states.".format(q))
         assert q in self.states
         self.marked.add(q)
+
+    def setUnsafe(self, q):
+        if q not in self.states:
+            print("The state {} is unknown. Add transitions before marking states.".format(q))
+        assert q in self.states
+        self.unsafe.add(q)
 
 class Distributed:
     def __init__(self, automata = []):
@@ -32,29 +52,62 @@ class Distributed:
     def stateVars(self, state, V):
         assert len(state) == len(self.automata)
         variables = []
-        for i in range(len(state)):
-            variables.append(V[i][state[i]])
-
+        for i in range(len(state)):        
+            variables.append(V[i][self.automata[i].states[state[i]]])
         return variables
 
     # returns a list of controllable successor states of the state
     def succC(self, state):
         states = []
+        bigAlphabet = set()
+        for i in range(len(self.automata)):
+            bigAlphabet = bigAlphabet.union(self.automata[i].getAlphabet())
+
+        for action in bigAlphabet:
+            succ = []
+            for i in range(len(state)):
+                s = self.automata[i].states[state[i]]
+                if action not in self.automata[i].getAlphabet(): #the state does not change
+                    succ.append(state[i])
+                elif s not in self.automata[i].transitions:
+                    succ.append(-1) #the state is a dead end
+                else:
+                    enabled = False
+                    for t in self.automata[i].transitions[s]:
+                        if t[1] == action:
+                            index = self.automata[i].mapa[t[0]]
+                            succ.append(index)
+                            enabled = True
+                            break
+                    if not enabled: #the action is not enabled in the state
+                        succ.append(-1)
+            if not -1 in succ:
+                states.append(succ[:])
 
         return states
 
     # returns a list of uncontrollable successor states of the state
     def succUC(self, state):
-        pass
+        states = []
+        
+        return states
 
     def succ(self, state):
         return self.succC(state) + self.succUC(state)
 
     def isMarked(self, state):
-        pass
+        marked = True
+        for i in range(len(state)):
+            s = self.automata[i].states[state[i]]
+            marked = marked and s in self.automata[i].marked
+        return marked
 
     def isSafe(self, state):
-        pass
+        unsafe = False
+        for i in range(len(state)):
+            s = self.automata[i].states[state[i]]
+            unsafe = unsafe or s in self.automata[i].unsafe
+        return not unsafe
 
     def encode(self):
         self.X = []
@@ -79,27 +132,27 @@ class Distributed:
             left = And(self.stateVars(s, self.C)) 
             right = [And(self.stateVars(s, self.M) + self.stateVars(s, self.X))] # M[s] & X[s]
             right += [Or([And(self.stateVars(s2, self.C) + self.stateVars(s2, self.X)) for s2 in self.succ(s)])]
-            solver.add(left == Or(right))
+            self.solver.add(left == Or(right))
 
         for s in self.states:
             left = And(self.stateVars(s, self.X))
             right = [And(self.stateVars(s, self.T)), Not(And(self.stateVars(s, self.C)))]
-            right += [Not(And(self.stateVars(s2, self.X))) for s2 in self.succU(s)]
-            solver.add(left == Or(right))
+            right += [Not(And(self.stateVars(s2, self.X))) for s2 in self.succUC(s)]
+            self.solver.add(left == Or(right))
 
         # marked states
         for s in self.states:
             if self.isMarked(s):
-                s.add(And(self.stateVars(s, self.M)))
+                self.solver.add(And(self.stateVars(s, self.M)))
             else:
-                s.add(Not(And(self.stateVars(s, self.M))))
+                self.solver.add(Not(And(self.stateVars(s, self.M))))
 
         # unsafe states
         for s in self.states:
             if not self.isSafe(s):
-                s.add(And(self.stateVars(s, self.T)))
+                self.solver.add(And(self.stateVars(s, self.T)))
             else:
-                s.add(Not(And(self.stateVars(s, self.T))))
+                self.solver.add(Not(And(self.stateVars(s, self.T))))
 
 #######################
 ### Definition of the base automata
